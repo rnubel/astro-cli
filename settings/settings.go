@@ -106,33 +106,39 @@ func InitSettings(settingsFile string) error {
 // AddVariables is a function to add Variables from settings.yaml
 func AddVariables(id string, version uint64) {
 	variables := settings.Airflow.Variables
+	baseCmd := "airflow variables "
+	if version >= AirflowVersionTwo {
+		baseCmd += "set %s " // Airflow 2.0.0 command
+	} else {
+		baseCmd += "-s %s"
+	}
+	variableCmds := ""
 	for _, variable := range variables {
-		if !objectValidator(0, variable.VariableName) {
-			if objectValidator(0, variable.VariableValue) {
+		if objectValidator(0, variable.VariableName) && objectValidator(0, variable.VariableValue) {
+			airflowCommand := fmt.Sprintf(baseCmd, variable.VariableName)
+			airflowCommand += fmt.Sprintf("'%s' && ", variable.VariableValue)
+			variableCmds += airflowCommand
+			fmt.Printf("Added Variable: %s\n", variable.VariableName)
+		} else {
+			if !objectValidator(0, variable.VariableName) {
 				fmt.Print("Skipping Variable Creation: No Variable Name Specified.\n")
 			}
-		} else if objectValidator(0, variable.VariableValue) {
-			baseCmd := "airflow variables "
-			if version >= AirflowVersionTwo {
-				baseCmd += "set %s " // Airflow 2.0.0 command
-			} else {
-				baseCmd += "-s %s"
-			}
-
-			airflowCommand := fmt.Sprintf(baseCmd, variable.VariableName)
-
-			airflowCommand += fmt.Sprintf("'%s'", variable.VariableValue)
-			out := execAirflowCommand(id, airflowCommand)
-			logrus.Debugf("Adding variable logs:\n" + out)
-			fmt.Printf("Added Variable: %s\n", variable.VariableName)
 		}
 	}
+	// Remove the trailing " && " from the variableCmds string
+	if len(variableCmds) > 0 {
+		variableCmds = variableCmds[:len(variableCmds)-4]
+	}
+	out := execAirflowCommand(id, variableCmds)
+	logrus.Debugf("Adding variable logs:\n" + out)
 }
 
 // AddConnections is a function to add Connections from settings.yaml
 func AddConnections(id string, version uint64) {
 	connections := settings.Airflow.Connections
 	baseCmd := "airflow connections "
+	commands := make([]string, 0)
+
 	var baseAddCmd, baseRmCmd, baseListCmd, connIDArg, connTypeArg, connURIArg, connExtraArg, connHostArg, connLoginArg, connPasswordArg, connSchemaArg, connPortArg string
 	if version >= AirflowVersionTwo {
 		// Airflow 2.0.0 command
@@ -222,10 +228,13 @@ func AddConnections(id string, version uint64) {
 			airflowCommand += fmt.Sprintf("%s '%s' ", connURIArg, conn.ConnURI)
 		}
 
-		out := execAirflowCommand(id, airflowCommand)
-		logrus.Debugf("Adding Connection logs:\n\n" + out)
+		commands = append(commands, airflowCommand)
 		fmt.Printf("Added Connection: %s\n", conn.ConnID)
 	}
+
+	commandStr := strings.Join(commands, " && ")
+	out = execAirflowCommand(id, commandStr)
+	logrus.Debugf("Adding Connection logs:\n\n" + out)
 }
 
 // AddPools  is a function to add Pools from settings.yaml
